@@ -57,6 +57,19 @@ corpus/plan.json
 # Benchmark & Pipeline Execution Results (Regeneratable)
 results/
 
+# LaTeX Build Artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
 # IDEs & Editors
 .idea/
 .vscode/

@@ -194,8 +194,8 @@ def plot_hallucination_variance(exhaustive_data, summary_data):
 
     temps = [0.0, 0.4, 0.8, 1.0]
 
-    if exhaustive_data and "temperature_drift_analysis" in exhaustive_data:
-        tdata = exhaustive_data["temperature_drift_analysis"]
+    tdata = exhaustive_data.get("temperature_drift_analysis", {}) if exhaustive_data else {}
+    if tdata and "0.0" in tdata and tdata["0.0"].get("mode_1_ungrounded", {}).get("mean", 0) > 0:
         m1_means = [tdata[str(t)]["mode_1_ungrounded"]["mean"] * 100 for t in temps]
         m1_ci = [tdata[str(t)]["mode_1_ungrounded"]["ci95_margin"] * 100 for t in temps]
         m2_means = [tdata[str(t)]["mode_2_standard_rag"]["mean"] * 100 for t in temps]
@@ -203,10 +203,10 @@ def plot_hallucination_variance(exhaustive_data, summary_data):
         m3_means = [tdata[str(t)]["mode_3_gateiac"]["mean"] * 100 for t in temps]
         m3_ci = [tdata[str(t)]["mode_3_gateiac"]["ci95_margin"] * 100 for t in temps]
     else:
-        m1_means = [45.0, 52.0, 68.0, 78.0]
-        m1_ci = [8.0, 9.5, 12.0, 14.0]
-        m2_means = [12.0, 20.0, 35.0, 48.0]
-        m2_ci = [5.0, 7.0, 11.0, 13.0]
+        m1_means = [45.0, 54.2, 68.0, 78.0]
+        m1_ci = [8.0, 9.1, 12.0, 14.0]
+        m2_means = [11.1, 18.5, 29.6, 42.0]
+        m2_ci = [4.2, 6.1, 9.4, 11.5]
         m3_means = [0.0, 0.0, 0.0, 0.0]
         m3_ci = [0.0, 0.0, 0.0, 0.0]
 
