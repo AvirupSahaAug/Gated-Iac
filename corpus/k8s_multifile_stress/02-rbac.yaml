@@ -1,0 +1,175 @@
+# RBAC definitions - THE VULNERABILITY IS HERE
+# The "analytics-processor" ServiceAccount gets ClusterRole with secrets access
+# This SA is later mounted into a pod that has hostNetwork: true
+# and no NetworkPolicy restrictions
+
+# --- Legitimate: read-only role for monitoring ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-readonly-binding
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-sa
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: monitoring-readonly
+  apiGroup: rbac.authorization.k8s.io
+---
+# --- Legitimate: namespace-scoped role for API service ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-service-role
+  namespace: platform-core
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["api-db-credentials", "api-jwt-secret"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-service-binding
+  namespace: platform-core
+subjects:
+  - kind: ServiceAccount
+    name: api-service-sa
+    namespace: platform-core
+roleRef:
+  kind: Role
+  name: api-service-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# --- Legitimate: cert-manager role ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller
+rules:
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "issuers", "clusterissuers"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-binding
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager-sa
+    namespace: cert-manager
+roleRef:
+  kind: ClusterRole
+  name: cert-manager-controller
+  apiGroup: rbac.authorization.k8s.io
+---
+# --- Legitimate: ingress controller role ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ingress-nginx-role
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ingress-nginx-binding
+subjects:
+  - kind: ServiceAccount
+    name: ingress-nginx-sa
+    namespace: ingress-system
+roleRef:
+  kind: ClusterRole
+  name: ingress-nginx-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ============================================================
+# THE OVERPRIVILEGED ROLE — analytics-processor gets cluster-wide secrets
+# ============================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: analytics-data-access
+  labels:
+    app: analytics-processor
+    team: data-engineering
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]    # <-- grants cluster-wide secrets read
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: analytics-data-access-binding
+subjects:
+  - kind: ServiceAccount
+    name: analytics-processor-sa
+    namespace: analytics
+roleRef:
+  kind: ClusterRole
+  name: analytics-data-access
+  apiGroup: rbac.authorization.k8s.io
+---
+# --- Legitimate: read-only namespace viewer ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-viewer
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: developer-ns-viewer
+subjects:
+  - kind: Group
+    name: developers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: namespace-viewer
+  apiGroup: rbac.authorization.k8s.io
+

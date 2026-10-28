@@ -1,0 +1,821 @@
+# Single source of truth for policy text.
+# OPA/Rego encodes the deterministic subset of these (pattern-matchable).
+# The LLM must cite a policy_id + a quoted fragment of that policy's `text`
+# for any contextual finding. The citation gate checks the fragment actually
+# appears in the cited policy's text before accepting the finding.
+
+- policy_id: POL-S3-001
+  title: "No public S3 bucket ACLs"
+  cis_ref: "CIS AWS 2.1.1"
+  enforced_by: "opa"
+  text: >
+    S3 buckets must not be configured with a public-read or public-read-write
+    ACL. Bucket access must be restricted to authenticated, authorized
+    principals only.
+
+- policy_id: POL-S3-002
+  title: "S3 buckets must have server-side encryption enabled"
+  cis_ref: "CIS AWS 2.1.2"
+  enforced_by: "opa"
+  text: >
+    S3 buckets must be configured with server-side encryption enabled to ensure
+    all stored objects are encrypted at rest using KMS or AES256.
+
+- policy_id: POL-SG-001
+  title: "No unrestricted SSH ingress"
+  cis_ref: "CIS AWS 5.2"
+  enforced_by: "opa"
+  text: >
+    Security groups must not allow ingress on port 22 (SSH) from 0.0.0.0/0.
+    SSH access must be restricted to known, bastion, or VPN-scoped CIDR
+    ranges.
+
+- policy_id: POL-IAM-002
+  title: "No internet-facing compute with broad data-plane access"
+  cis_ref: "Org control IAM-CTX-02"
+  enforced_by: "llm_contextual"
+  text: >
+    A compute resource that is reachable from 0.0.0.0/0 on any port must not
+    be attached to an IAM role or instance profile granting read or write
+    access to sensitive data stores (S3 buckets, databases, secrets
+    managers). This is a cross-resource condition: the security group,
+    instance, and IAM policy must be evaluated together, not in isolation.
+
+- policy_id: POL-IAM-003
+  title: "No wildcard IAM actions or resources"
+  cis_ref: "CIS AWS 1.16"
+  enforced_by: "opa"
+  text: >
+    IAM policies must not use "*" as the Action or Resource value. Grants
+    must be scoped to specific actions and specific ARNs.
+
+- policy_id: POL-DDB-001
+  title: "DynamoDB tables must have server-side encryption enabled"
+  cis_ref: "CIS AWS 3.3"
+  enforced_by: "opa"
+  text: >
+    DynamoDB tables must be configured with server-side encryption enabled
+    to safeguard sensitive tabular data at rest.
+
+- policy_id: POL-IAM-004
+  title: "No unauthenticated public serverless compute with data-plane write access"
+  cis_ref: "Org control SVR-CTX-01"
+  enforced_by: "llm_contextual"
+  text: >
+    Serverless compute functions exposed via unauthenticated public endpoints
+    or unrestricted function URLs must not be granted write or administrative
+    privileges over backend data stores. Unauthenticated ingress paths combined
+    with database write access create critical unauthorized modification vectors.
+
+- policy_id: POL-RDS-001
+  title: "RDS database instances must have storage encryption enabled"
+  cis_ref: "CIS AWS 2.3.1"
+  enforced_by: "opa"
+  text: >
+    Amazon RDS database instances must be deployed with storage encryption enabled
+    to ensure data at rest, automated backups, and snapshots are encrypted.
+
+- policy_id: POL-RDS-002
+  title: "No public database instances with unrestricted network ingress"
+  cis_ref: "Org control RDS-CTX-01"
+  enforced_by: "llm_contextual"
+  text: >
+    Relational database instances containing application data stores must not be
+    configured with public accessibility in conjunction with security groups
+    permitting unrestricted internet ingress. Databases must reside in private subnets
+    accessible only by authorized application tier workloads.
+
+- policy_id: POL-IAM-005
+  title: "No wildcard cross-account IAM role trust relationships"
+  cis_ref: "Org control IAM-CTX-03"
+  enforced_by: "llm_contextual"
+  text: >
+    IAM role trust relationships must not specify wildcard principals or allow
+    arbitrary external accounts to assume privileges without explicit condition
+    constraints. Unfettered trust policies allow untrusted external identities to
+    assume role credentials and access internal organizational resources.
+
+
+- policy_id: POL-EC2-002
+  title: "Enforce IMDSv2 on compute instances to prevent credential theft"
+  cis_ref: "CIS AWS 5.6"
+  enforced_by: "opa"
+  text: >
+    EC2 instances must require IMDSv2 token authentication with http_tokens set to
+    required to mitigate Server-Side Request Forgery credential exfiltration attacks.
+
+- policy_id: POL-EC2-003
+  title: "No public compute instances with legacy IMDSv1 and privileged IAM roles"
+  cis_ref: "Org control IMDS-CTX-01"
+  enforced_by: "llm_contextual"
+  text: >
+    Compute instances accessible from the internet that do not require IMDSv2 token
+    authentication must not be attached to IAM roles possessing access to sensitive
+    cloud resources. The absence of IMDSv2 combined with public ingress allows SSRF
+    vulnerabilities in web applications to be weaponized for credential exfiltration.
+
+# ===================================================================
+# Extended Policy Catalog (Noise / Decoy policies for stress testing)
+# These are real-sounding policies the LLM must NOT misattribute.
+# ===================================================================
+
+- policy_id: POL-VPC-001
+  title: "VPC flow logs must be enabled on all production VPCs"
+  cis_ref: "CIS AWS 3.9"
+  enforced_by: "opa"
+  text: >
+    All Virtual Private Cloud networks deployed in production accounts must have
+    VPC Flow Logs enabled with a retention period of at least 90 days. Flow logs
+    must capture ALL traffic types including accepted and rejected connections for
+    forensic investigation and anomaly detection purposes.
+
+- policy_id: POL-VPC-002
+  title: "No default VPC usage in production environments"
+  cis_ref: "CIS AWS 2.6"
+  enforced_by: "opa"
+  text: >
+    Production workloads must not be deployed in the default VPC. Default VPCs
+    contain overly permissive default security groups and route tables that
+    violate network segmentation principles and least-privilege networking.
+
+- policy_id: POL-CT-001
+  title: "CloudTrail logging must be enabled in all regions"
+  cis_ref: "CIS AWS 3.1"
+  enforced_by: "opa"
+  text: >
+    AWS CloudTrail must be configured as a multi-region trail with management
+    event logging enabled. Trail logs must be delivered to an encrypted S3
+    bucket with log file validation enabled to detect tampering attempts.
+
+- policy_id: POL-CT-002
+  title: "CloudTrail log files must have integrity validation enabled"
+  cis_ref: "CIS AWS 3.2"
+  enforced_by: "opa"
+  text: >
+    CloudTrail trails must enable log file validation to ensure integrity
+    of delivered log files and detect unauthorized modification or deletion
+    of audit evidence required for compliance and incident response workflows.
+
+- policy_id: POL-CW-001
+  title: "CloudWatch log groups must have retention policies configured"
+  cis_ref: "CIS AWS 3.4"
+  enforced_by: "opa"
+  text: >
+    All CloudWatch Log Groups must be configured with explicit retention
+    periods between 30 and 365 days. Indefinite retention without lifecycle
+    policies generates unnecessary storage costs and compliance burdens.
+
+- policy_id: POL-ECS-001
+  title: "ECS task definitions must not run containers in privileged mode"
+  cis_ref: "CIS ECS 5.4"
+  enforced_by: "opa"
+  text: >
+    ECS task definitions must not set the privileged flag to true on any
+    container definition. Privileged containers bypass kernel namespace
+    isolation and can access host-level resources including device drivers,
+    kernel modules, and other container processes running on the same host.
+
+- policy_id: POL-ECS-002
+  title: "ECS task definitions must specify resource limits for CPU and memory"
+  cis_ref: "CIS ECS 5.7"
+  enforced_by: "opa"
+  text: >
+    All ECS container definitions must explicitly specify CPU and memory
+    resource limits to prevent resource exhaustion attacks where a single
+    compromised container consumes all available compute resources on the
+    underlying host infrastructure affecting co-tenant workloads.
+
+- policy_id: POL-ECS-003
+  title: "No ECS services with public IP assignment in private subnets"
+  cis_ref: "Org control ECS-NET-01"
+  enforced_by: "llm_contextual"
+  text: >
+    ECS services deployed in private subnets must not enable automatic
+    public IP assignment. Public IP addresses on private subnet containers
+    bypass NAT gateway egress controls and expose workloads directly to
+    the internet without application load balancer security protections.
+
+- policy_id: POL-LMB-001
+  title: "Lambda functions must have execution timeout configured"
+  cis_ref: "Org control LMB-001"
+  enforced_by: "opa"
+  text: >
+    Lambda functions must explicitly configure an execution timeout value
+    not exceeding 300 seconds for API-facing functions and 900 seconds for
+    batch processing functions to prevent runaway execution costs and
+    resource exhaustion during denial-of-service or recursive invocations.
+
+- policy_id: POL-LMB-002
+  title: "Lambda functions must not use deprecated runtime versions"
+  cis_ref: "Org control LMB-002"
+  enforced_by: "opa"
+  text: >
+    Lambda functions must use actively supported runtime versions that
+    receive security patches from the runtime vendor. Deprecated runtimes
+    such as python3.6, nodejs12.x, and dotnetcore2.1 must be upgraded to
+    prevent exploitation of known vulnerabilities in unsupported libraries.
+
+- policy_id: POL-CF-001
+  title: "CloudFront distributions must enforce HTTPS-only viewer connections"
+  cis_ref: "CIS AWS 2.5"
+  enforced_by: "opa"
+  text: >
+    CloudFront distributions must be configured with viewer protocol
+    policy set to redirect-to-https or https-only. Plaintext HTTP viewer
+    connections allow man-in-the-middle interception of sensitive content
+    including authentication tokens and personally identifiable information.
+
+- policy_id: POL-CF-002
+  title: "CloudFront distributions must have WAF web ACL associations"
+  cis_ref: "Org control CDN-SEC-01"
+  enforced_by: "llm_contextual"
+  text: >
+    Internet-facing CloudFront distributions serving dynamic application
+    content must be associated with AWS WAF web ACL rules providing OWASP
+    Top 10 protection including SQL injection, cross-site scripting, and
+    request rate limiting to mitigate volumetric and application-layer attacks.
+
+- policy_id: POL-SM-001
+  title: "Secrets Manager secrets must have automatic rotation enabled"
+  cis_ref: "CIS AWS 2.4"
+  enforced_by: "opa"
+  text: >
+    Secrets stored in AWS Secrets Manager must have automatic rotation
+    configured with a rotation interval not exceeding 90 days. Database
+    credentials, API keys, and OAuth tokens must be rotated automatically
+    to limit the blast radius of credential compromise incidents.
+
+- policy_id: POL-WAF-001
+  title: "WAF web ACLs must include rate-based rules"
+  cis_ref: "Org control WAF-001"
+  enforced_by: "opa"
+  text: >
+    AWS WAF web ACLs associated with public-facing resources must include
+    at least one rate-based rule limiting requests per IP address to prevent
+    brute force authentication attacks and application-layer DDoS events.
+
+- policy_id: POL-AGW-001
+  title: "API Gateway stages must have access logging enabled"
+  cis_ref: "Org control APIGW-001"
+  enforced_by: "opa"
+  text: >
+    API Gateway deployment stages must enable access logging to CloudWatch
+    Logs with full request and response metadata including source IP, user
+    agent, request path, response code, and integration latency metrics.
+
+- policy_id: POL-AGW-002
+  title: "No API Gateway endpoints without authentication mechanisms"
+  cis_ref: "Org control APIGW-002"
+  enforced_by: "llm_contextual"
+  text: >
+    API Gateway endpoints serving sensitive business operations must not be
+    deployed without authentication. Public APIs must use IAM authorization,
+    Cognito user pool authorizers, or Lambda authorizer functions to validate
+    caller identity before permitting access to backend integration targets.
+
+- policy_id: POL-SQS-001
+  title: "SQS queues must have server-side encryption enabled"
+  cis_ref: "CIS AWS 2.2"
+  enforced_by: "opa"
+  text: >
+    SQS queues must be configured with server-side encryption using either
+    SSE-SQS or SSE-KMS to protect message payloads at rest. Unencrypted
+    queues expose message content to unauthorized access through compromised
+    storage volumes or cross-account API exploitation.
+
+- policy_id: POL-SNS-001
+  title: "SNS topics must have server-side encryption enabled"
+  cis_ref: "CIS AWS 2.3"
+  enforced_by: "opa"
+  text: >
+    SNS topics must be configured with server-side encryption using KMS
+    customer-managed keys to protect notification payloads containing
+    sensitive operational data including alert details and system metrics.
+
+- policy_id: POL-ECR-001
+  title: "ECR repositories must have image scanning enabled on push"
+  cis_ref: "CIS ECS 5.1"
+  enforced_by: "opa"
+  text: >
+    Elastic Container Registry repositories must enable scan-on-push to
+    automatically detect known CVE vulnerabilities in container images
+    before deployment. Images with critical or high severity vulnerabilities
+    must be blocked from deployment through lifecycle policy enforcement.
+
+- policy_id: POL-ECR-002
+  title: "ECR repositories must have immutable image tags"
+  cis_ref: "CIS ECS 5.2"
+  enforced_by: "opa"
+  text: >
+    ECR repositories must be configured with immutable image tags to prevent
+    overwriting previously published container images. Mutable tags enable
+    supply chain attacks where malicious images replace trusted versions
+    without changing the deployment reference tag identifier.
+
+- policy_id: POL-KMS-001
+  title: "KMS keys must have automatic key rotation enabled"
+  cis_ref: "CIS AWS 2.8"
+  enforced_by: "opa"
+  text: >
+    Customer-managed KMS keys must have automatic key rotation enabled with
+    a rotation period not exceeding 365 days. Key rotation limits the volume
+    of data encrypted under a single key version reducing cryptographic
+    exposure in the event of key material compromise.
+
+- policy_id: POL-ELB-001
+  title: "Application load balancers must have access logging enabled"
+  cis_ref: "CIS AWS 3.5"
+  enforced_by: "opa"
+  text: >
+    Application Load Balancers must enable access logging to an encrypted S3
+    bucket. Access logs capture client IP, request processing time, TLS cipher,
+    and target response codes required for security monitoring and forensic
+    investigation of web application attack patterns.
+
+- policy_id: POL-ELB-002
+  title: "No load balancers with HTTP listeners without redirect to HTTPS"
+  cis_ref: "Org control ELB-SEC-01"
+  enforced_by: "llm_contextual"
+  text: >
+    Application Load Balancers must not serve application traffic over plaintext
+    HTTP without redirecting to HTTPS. HTTP listeners accepting application
+    requests without TLS encryption expose authentication credentials, session
+    tokens, and user data to network-level interception attacks.
+
+- policy_id: POL-RDS-003
+  title: "RDS instances must not have public parameter groups with logging disabled"
+  cis_ref: "CIS AWS 2.3.3"
+  enforced_by: "opa"
+  text: >
+    RDS database instances must use custom parameter groups with audit logging
+    enabled including slow query logs, general logs, and error logs directed
+    to CloudWatch for centralized security monitoring and anomaly detection.
+
+- policy_id: POL-RDS-004
+  title: "No RDS instances with minor version auto-upgrade disabled"
+  cis_ref: "CIS AWS 2.3.2"
+  enforced_by: "opa"
+  text: >
+    RDS database instances must have auto minor version upgrade enabled to
+    automatically receive security patches and bug fixes for the database
+    engine. Disabling auto-upgrade increases exposure to known database
+    engine vulnerabilities that have published exploit code.
+
+- policy_id: POL-CB-001
+  title: "CodeBuild projects must not store credentials in environment variables"
+  cis_ref: "Org control CB-001"
+  enforced_by: "llm_contextual"
+  text: >
+    CodeBuild project configurations must not store sensitive credentials,
+    API keys, or database passwords in plaintext environment variables.
+    Secrets must be referenced from Secrets Manager or SSM Parameter Store
+    SecureString parameters to prevent credential exposure in build logs.
+
+- policy_id: POL-EC-001
+  title: "ElastiCache clusters must have encryption at rest enabled"
+  cis_ref: "CIS AWS 2.7"
+  enforced_by: "opa"
+  text: >
+    ElastiCache Redis and Memcached clusters must be deployed with at-rest
+    encryption enabled using KMS-managed keys. Unencrypted cache clusters
+    expose session tokens, temporary credentials, and cached application
+    data to unauthorized access through compromised storage infrastructure.
+
+- policy_id: POL-EC-002
+  title: "ElastiCache clusters must have encryption in transit enabled"
+  cis_ref: "CIS AWS 2.7.1"
+  enforced_by: "opa"
+  text: >
+    ElastiCache Redis clusters must enable in-transit encryption using TLS
+    to protect data exchanged between application clients and cache nodes.
+    Unencrypted connections allow network-level interception of cached
+    sensitive data including authentication tokens and user session state.
+
+- policy_id: POL-KIN-001
+  title: "Kinesis streams must have server-side encryption enabled"
+  cis_ref: "CIS AWS 2.9"
+  enforced_by: "opa"
+  text: >
+    Kinesis Data Streams must be configured with server-side encryption
+    using KMS-managed keys to protect streaming event payloads at rest.
+    Unencrypted streams expose real-time data including clickstream events,
+    transaction records, and IoT telemetry to unauthorized read access.
+
+- policy_id: POL-GL-001
+  title: "Glue jobs must have encryption configuration for job bookmarks"
+  cis_ref: "Org control GLUE-001"
+  enforced_by: "opa"
+  text: >
+    AWS Glue ETL jobs must configure security configurations with S3
+    encryption, CloudWatch log encryption, and job bookmark encryption
+    to protect intermediate data transformation outputs and processing
+    state from unauthorized access during extract-transform-load workflows.
+
+- policy_id: POL-R53-001
+  title: "Route53 hosted zones must not have public DNS records for internal services"
+  cis_ref: "CIS AWS 4.1"
+  enforced_by: "opa"
+  text: >
+    Route53 hosted zones must not expose internal service endpoints through public DNS A or CNAME records. Internal microservice discovery endpoints, database hostnames, and administrative interfaces must use private hosted zones to prevent reconnaissance and direct targeting of backend infrastructure.
+
+- policy_id: POL-R53-002
+  title: "Route53 health checks must use HTTPS protocol"
+  cis_ref: "Org control DNS-001"
+  enforced_by: "opa"
+  text: >
+    Route53 health checks monitoring public endpoints must be configured with HTTPS protocol verification to validate TLS certificate authenticity and prevent false-positive health status from man-in-the-middle proxy intercepts returning spoofed HTTP 200 responses.
+
+- policy_id: POL-ASG-001
+  title: "Auto Scaling groups must have health check grace period configured"
+  cis_ref: "Org control ASG-001"
+  enforced_by: "opa"
+  text: >
+    Auto Scaling groups must configure health check grace periods of at least 120 seconds for application load balancer health checks to prevent premature instance termination during application initialization and dependency warm-up sequences.
+
+- policy_id: POL-ASG-002
+  title: "Auto Scaling launch templates must use current AMI versions"
+  cis_ref: "Org control ASG-002"
+  enforced_by: "opa"
+  text: >
+    Auto Scaling launch templates must reference AMI versions published within the last 90 days that include current operating system security patches. Stale AMI references deploy instances with known kernel and library vulnerabilities exploitable through network-accessible services.
+
+- policy_id: POL-EFS-001
+  title: "EFS file systems must have encryption at rest enabled"
+  cis_ref: "CIS AWS 2.10"
+  enforced_by: "opa"
+  text: >
+    Elastic File System volumes must be created with encryption at rest enabled using KMS customer-managed keys. Unencrypted EFS volumes expose shared file system data including application configuration files and uploaded user content to unauthorized storage-level access.
+
+- policy_id: POL-EFS-002
+  title: "EFS mount targets must enforce encryption in transit"
+  cis_ref: "CIS AWS 2.10.1"
+  enforced_by: "opa"
+  text: >
+    EFS mount targets must be configured with TLS transport encryption enforced through mount helper options. Unencrypted NFS connections between compute instances and EFS endpoints expose file content and metadata to network sniffing attacks within the VPC.
+
+- policy_id: POL-CG-001
+  title: "Cognito user pools must enforce multi-factor authentication"
+  cis_ref: "Org control AUTH-001"
+  enforced_by: "opa"
+  text: >
+    Amazon Cognito user pools must require multi-factor authentication for all user sign-in operations. Password-only authentication is insufficient for applications handling sensitive data or financial transactions due to credential stuffing and phishing attack prevalence.
+
+- policy_id: POL-CG-002
+  title: "Cognito user pools must have advanced security features enabled"
+  cis_ref: "Org control AUTH-002"
+  enforced_by: "opa"
+  text: >
+    Cognito user pools must enable advanced security features including compromised credential detection, adaptive authentication risk scoring, and account takeover protection to automatically detect and block suspicious authentication attempts from anomalous locations or devices.
+
+- policy_id: POL-MSK-001
+  title: "MSK clusters must have encryption in transit between brokers"
+  cis_ref: "Org control KAFKA-001"
+  enforced_by: "opa"
+  text: >
+    Amazon MSK Kafka clusters must enable TLS encryption for inter-broker communication to protect message replication traffic containing sensitive event payloads from network-level interception between availability zone broker nodes within the cluster VPC.
+
+- policy_id: POL-MSK-002
+  title: "MSK clusters must not allow unauthenticated client connections"
+  cis_ref: "Org control KAFKA-002"
+  enforced_by: "opa"
+  text: >
+    Amazon MSK clusters must enforce client authentication using IAM access control or mutual TLS certificates. Unauthenticated Kafka client connections allow any workload within the VPC to consume or produce messages to sensitive event streams without identity verification.
+
+- policy_id: POL-NP-001
+  title: "Neptune database clusters must have audit logging enabled"
+  cis_ref: "Org control GRAPH-001"
+  enforced_by: "opa"
+  text: >
+    Amazon Neptune graph database clusters must enable audit logging to capture all Gremlin and SPARQL query operations for security monitoring and access pattern analysis required for detecting unauthorized graph traversal and data extraction attempts.
+
+- policy_id: POL-OS-001
+  title: "OpenSearch domains must have fine-grained access control enabled"
+  cis_ref: "Org control SEARCH-001"
+  enforced_by: "opa"
+  text: >
+    Amazon OpenSearch Service domains must enable fine-grained access control with internal user database or SAML authentication to restrict document-level and field-level access. Domain-level IAM policies alone are insufficient for multi-tenant search workloads requiring data isolation.
+
+- policy_id: POL-OS-002
+  title: "OpenSearch domains must not be publicly accessible"
+  cis_ref: "CIS AWS 4.8"
+  enforced_by: "opa"
+  text: >
+    OpenSearch Service domains must be deployed within VPC subnets and must not enable public access endpoints. Publicly accessible search domains expose indexed data including logs, application records, and analytics datasets to internet-based query exploitation.
+
+- policy_id: POL-BK-001
+  title: "AWS Backup vaults must have vault lock policies enabled"
+  cis_ref: "Org control BK-001"
+  enforced_by: "opa"
+  text: >
+    AWS Backup vaults must be configured with vault lock policies in governance or compliance mode to prevent deletion or modification of backup recovery points. Unlocked vaults allow ransomware operators to delete backups after encrypting primary data stores.
+
+- policy_id: POL-BK-002
+  title: "AWS Backup plans must include cross-region copy rules"
+  cis_ref: "Org control BK-002"
+  enforced_by: "opa"
+  text: >
+    AWS Backup plans for production workloads must include at least one cross-region copy rule to maintain geographically separated backup copies for disaster recovery. Single-region backups are vulnerable to regional service disruptions and cascading infrastructure failures.
+
+- policy_id: POL-GD-001
+  title: "GuardDuty must be enabled in all regions"
+  cis_ref: "CIS AWS 4.15"
+  enforced_by: "opa"
+  text: >
+    Amazon GuardDuty must be enabled across all AWS regions including unused regions to detect unauthorized API calls, cryptocurrency mining, and credential compromise indicators. Regional GuardDuty gaps allow threat actors to conduct malicious operations in unmonitored regions.
+
+- policy_id: POL-SH-001
+  title: "Security Hub must be enabled with CIS benchmark standards"
+  cis_ref: "CIS AWS 4.16"
+  enforced_by: "opa"
+  text: >
+    AWS Security Hub must be enabled with CIS AWS Foundations Benchmark and AWS Foundational Security Best Practices standards activated for continuous compliance monitoring and automated finding aggregation from GuardDuty, Inspector, and Macie security services.
+
+- policy_id: POL-INS-001
+  title: "Inspector must be enabled for EC2 and ECR scanning"
+  cis_ref: "Org control VULN-001"
+  enforced_by: "opa"
+  text: >
+    Amazon Inspector must be enabled for both EC2 instance vulnerability scanning and ECR container image scanning to maintain continuous visibility into software vulnerability exposure across compute workloads and container deployment pipelines.
+
+- policy_id: POL-MC-001
+  title: "Macie must be enabled for S3 sensitive data discovery"
+  cis_ref: "Org control DATA-001"
+  enforced_by: "opa"
+  text: >
+    Amazon Macie must be enabled with automated sensitive data discovery jobs configured for all S3 buckets containing customer data to identify and classify personally identifiable information, financial records, and protected health information stored in cloud object storage.
+
+- policy_id: POL-TF-001
+  title: "Terraform state files must be stored in encrypted remote backends"
+  cis_ref: "Org control IAC-001"
+  enforced_by: "opa"
+  text: >
+    Terraform state files must be stored in encrypted S3 backends with DynamoDB state locking enabled. Local state files and unencrypted remote backends expose infrastructure resource identifiers, API endpoints, and computed secrets embedded in resource attributes.
+
+- policy_id: POL-TF-002
+  title: "Terraform providers must pin exact version constraints"
+  cis_ref: "Org control IAC-002"
+  enforced_by: "opa"
+  text: >
+    Terraform provider configurations must specify exact version constraints using the required_providers block to prevent automatic adoption of untested provider versions that may introduce breaking changes or supply chain compromised provider binaries.
+
+- policy_id: POL-NET-001
+  title: "Network ACLs must not allow unrestricted inbound traffic"
+  cis_ref: "CIS AWS 5.1"
+  enforced_by: "opa"
+  text: >
+    VPC Network Access Control Lists must not contain inbound rules allowing all traffic from 0.0.0.0/0 on all ports. Network ACL rules must be scoped to specific port ranges and CIDR blocks aligned with documented application connectivity requirements.
+
+- policy_id: POL-NET-002
+  title: "Transit Gateway route tables must not have default propagation enabled"
+  cis_ref: "Org control NET-002"
+  enforced_by: "opa"
+  text: >
+    AWS Transit Gateway route tables must not enable automatic route propagation from all attached VPCs. Default propagation creates transitive routing paths between workload VPCs that violate network segmentation policies and enable lateral movement across security boundaries.
+
+- policy_id: POL-ORG-001
+  title: "AWS Organizations must have service control policies enabled"
+  cis_ref: "CIS AWS 1.1"
+  enforced_by: "opa"
+  text: >
+    AWS Organizations must deploy service control policies restricting member account access to approved AWS regions, services, and maximum instance sizes. Unrestricted member accounts can provision resources in unmonitored regions and deploy oversized instances generating excessive costs.
+
+- policy_id: POL-ORG-002
+  title: "Organization member accounts must not have root user access keys"
+  cis_ref: "CIS AWS 1.4"
+  enforced_by: "opa"
+  text: >
+    Root user accounts in AWS Organization member accounts must not have active access keys. Root access keys provide unrestricted administrative access that bypasses all IAM policies and service control policies enabling complete account takeover.
+
+- policy_id: POL-CFN-001
+  title: "CloudFormation stacks must have termination protection enabled"
+  cis_ref: "Org control CFN-001"
+  enforced_by: "opa"
+  text: >
+    CloudFormation stacks managing production infrastructure must enable termination protection to prevent accidental deletion of critical resource stacks through IAM policy misconfiguration or unauthorized API calls from compromised automation credentials.
+
+- policy_id: POL-CFN-002
+  title: "CloudFormation stack policies must restrict resource replacement"
+  cis_ref: "Org control CFN-002"
+  enforced_by: "opa"
+  text: >
+    Production CloudFormation stacks must configure stack policies preventing replacement of stateful resources including RDS instances, DynamoDB tables, and EFS file systems during stack updates to prevent accidental data loss from resource recreation.
+
+- policy_id: POL-SSO-001
+  title: "IAM Identity Center must enforce MFA for all permission sets"
+  cis_ref: "CIS AWS 1.10"
+  enforced_by: "opa"
+  text: >
+    AWS IAM Identity Center must require multi-factor authentication for all permission set assignments granting access to production accounts. Single-factor authentication through federated identity providers is insufficient for privileged administrative access to cloud infrastructure.
+
+- policy_id: POL-SSO-002
+  title: "IAM Identity Center session duration must not exceed 4 hours"
+  cis_ref: "Org control SSO-002"
+  enforced_by: "opa"
+  text: >
+    IAM Identity Center permission sets must configure maximum session duration not exceeding 4 hours for production account access. Extended session durations increase the window of opportunity for session token theft and credential replay attacks.
+
+- policy_id: POL-DMS-001
+  title: "DMS replication instances must not be publicly accessible"
+  cis_ref: "Org control DMS-001"
+  enforced_by: "opa"
+  text: >
+    AWS Database Migration Service replication instances must not be configured with publicly accessible network settings. Public DMS instances expose database migration traffic including full table replications to network interception and unauthorized connection attempts.
+
+- policy_id: POL-DMS-002
+  title: "DMS endpoints must use SSL connections for source and target databases"
+  cis_ref: "Org control DMS-002"
+  enforced_by: "opa"
+  text: >
+    DMS source and target endpoints must enforce SSL/TLS connections for all database migration tasks. Unencrypted DMS connections transmit database records including credentials and sensitive application data in plaintext across network boundaries.
+
+- policy_id: POL-ATH-001
+  title: "Athena workgroups must have query result encryption enabled"
+  cis_ref: "Org control ATH-001"
+  enforced_by: "opa"
+  text: >
+    Amazon Athena workgroups must configure result encryption using SSE-S3 or SSE-KMS for all query output locations. Unencrypted query results stored in S3 expose sensitive data extracted from data lake tables to unauthorized object-level read access.
+
+- policy_id: POL-ATH-002
+  title: "Athena workgroups must enforce query result size limits"
+  cis_ref: "Org control ATH-002"
+  enforced_by: "opa"
+  text: >
+    Athena workgroups must configure data usage control limits to prevent runaway queries scanning entire data lake partitions. Unrestricted queries can scan petabytes of data generating excessive costs and extracting sensitive information beyond the intended query scope.
+
+- policy_id: POL-RS-001
+  title: "Redshift clusters must have audit logging enabled"
+  cis_ref: "CIS AWS 3.6"
+  enforced_by: "opa"
+  text: >
+    Amazon Redshift clusters must enable audit logging with connection logs, user activity logs, and user logs delivered to encrypted S3 destinations. Disabled audit logging prevents detection of unauthorized data warehouse queries and bulk data extraction attempts.
+
+- policy_id: POL-RS-002
+  title: "Redshift clusters must not be publicly accessible"
+  cis_ref: "CIS AWS 4.9"
+  enforced_by: "opa"
+  text: >
+    Redshift clusters must be deployed in private subnets without publicly accessible endpoints. Public data warehouse endpoints expose analytical datasets and aggregated business intelligence data to internet-based SQL injection and credential brute force attacks.
+
+- policy_id: POL-EMR-001
+  title: "EMR clusters must have encryption at rest and in transit enabled"
+  cis_ref: "Org control EMR-001"
+  enforced_by: "opa"
+  text: >
+    Amazon EMR clusters must enable both at-rest encryption for HDFS and EMRFS data and in-transit encryption for TLS-secured inter-node communication. Unencrypted big data processing clusters expose intermediate computation results and raw dataset partitions.
+
+- policy_id: POL-EMR-002
+  title: "EMR clusters must have Kerberos authentication enabled"
+  cis_ref: "Org control EMR-002"
+  enforced_by: "opa"
+  text: >
+    EMR clusters processing sensitive datasets must enable Kerberos authentication for all cluster node communication. Without Kerberos, any application on the cluster network can impersonate Hadoop service accounts and access HDFS data directories without identity verification.
+
+- policy_id: POL-SAG-001
+  title: "SageMaker notebook instances must not have direct internet access"
+  cis_ref: "Org control ML-001"
+  enforced_by: "opa"
+  text: >
+    Amazon SageMaker notebook instances must be deployed in VPC subnets without direct internet access. Internet-connected notebooks enable data exfiltration from training datasets and model artifacts through unrestricted outbound network connections.
+
+- policy_id: POL-SAG-002
+  title: "SageMaker endpoints must have data capture enabled for model monitoring"
+  cis_ref: "Org control ML-002"
+  enforced_by: "opa"
+  text: >
+    SageMaker inference endpoints serving production predictions must enable data capture for model monitoring and drift detection. Uncaptured inference requests prevent identification of adversarial inputs designed to manipulate model behavior or extract training data.
+
+- policy_id: POL-DAX-001
+  title: "DAX clusters must have encryption at rest enabled"
+  cis_ref: "Org control CACHE-001"
+  enforced_by: "opa"
+  text: >
+    DynamoDB Accelerator clusters must be deployed with encryption at rest enabled using customer-managed KMS keys. Unencrypted DAX nodes cache DynamoDB table contents in plaintext memory exposing sensitive data to cold boot and memory scraping attacks.
+
+- policy_id: POL-EKS-003
+  title: "EKS node groups must use encrypted EBS volumes"
+  cis_ref: "CIS EKS 4.3"
+  enforced_by: "opa"
+  text: >
+    EKS managed node group launch templates must specify encrypted EBS root and data volumes using KMS customer-managed keys. Unencrypted node volumes expose container filesystem layers, pulled images, and ephemeral storage to unauthorized disk-level access.
+
+- policy_id: POL-EKS-004
+  title: "EKS clusters must enable control plane logging"
+  cis_ref: "CIS EKS 4.1"
+  enforced_by: "opa"
+  text: >
+    Amazon EKS clusters must enable all control plane log types including API server, audit, authenticator, controller manager, and scheduler logs to CloudWatch for comprehensive Kubernetes control plane security monitoring and incident investigation.
+
+- policy_id: POL-IOT-001
+  title: "IoT Core policies must not grant wildcard resource permissions"
+  cis_ref: "Org control IOT-001"
+  enforced_by: "opa"
+  text: >
+    AWS IoT Core device policies must not use wildcard resource ARNs granting unrestricted access to all MQTT topics and device shadows. Overprivileged IoT policies allow compromised edge devices to subscribe to sensitive telemetry topics and send unauthorized commands.
+
+- policy_id: POL-IOT-002
+  title: "IoT device certificates must have expiration dates configured"
+  cis_ref: "Org control IOT-002"
+  enforced_by: "opa"
+  text: >
+    IoT device X.509 certificates registered in AWS IoT Core must have explicit expiration dates not exceeding 2 years. Non-expiring certificates for IoT devices deployed in physically accessible locations enable indefinite access after device decommissioning.
+
+- policy_id: POL-STF-001
+  title: "Step Functions state machines must have X-Ray tracing enabled"
+  cis_ref: "Org control ORCH-001"
+  enforced_by: "opa"
+  text: >
+    AWS Step Functions state machines orchestrating production workflows must enable X-Ray tracing for distributed request correlation and latency analysis across multi-service execution chains required for operational monitoring and performance debugging.
+
+- policy_id: POL-STF-002
+  title: "Step Functions must not pass sensitive data in state machine definitions"
+  cis_ref: "Org control ORCH-002"
+  enforced_by: "llm_contextual"
+  text: >
+    Step Functions state machine definitions must not embed sensitive data including API keys, database credentials, or encryption keys in task parameters or state definitions. Secrets must be resolved at runtime through Secrets Manager or SSM Parameter Store integrations.
+
+- policy_id: POL-TP-001
+  title: "Trusted Advisor checks must be enabled for cost optimization"
+  cis_ref: "Org control FINOPS-001"
+  enforced_by: "opa"
+  text: >
+    AWS Trusted Advisor security and cost optimization checks must be enabled and monitored weekly. Unreviewed Trusted Advisor recommendations result in accumulated security gaps including underutilized reserved capacity, idle load balancers, and unattached EBS volumes.
+
+- policy_id: POL-ACC-001
+  title: "AWS accounts must have alternate contacts configured"
+  cis_ref: "CIS AWS 1.2"
+  enforced_by: "opa"
+  text: >
+    AWS accounts must configure billing, operations, and security alternate contacts with valid email addresses and phone numbers to ensure AWS can reach the appropriate organizational contacts during billing disputes, operational incidents, and security compromise notifications.
+
+- policy_id: POL-IAM-006
+  title: "IAM password policy must enforce minimum length and complexity"
+  cis_ref: "CIS AWS 1.5"
+  enforced_by: "opa"
+  text: >
+    IAM account password policies must enforce minimum password length of 14 characters with requirements for uppercase, lowercase, numeric, and symbol characters. Weak password policies enable dictionary and brute force attacks against IAM console user accounts.
+
+- policy_id: POL-IAM-007
+  title: "IAM users must not have inline policies attached"
+  cis_ref: "CIS AWS 1.15"
+  enforced_by: "opa"
+  text: >
+    IAM users must not have inline policies directly attached. All permission grants must use managed policies attached to IAM groups or roles to enable centralized policy management, consistent permission boundaries, and simplified access auditing.
+
+- policy_id: POL-IAM-008
+  title: "IAM roles must have maximum session duration limits configured"
+  cis_ref: "Org control IAM-005"
+  enforced_by: "opa"
+  text: >
+    IAM roles used by human operators through assume-role must configure maximum session duration not exceeding 3600 seconds for production environments. Extended role sessions increase the window for session credential theft and unauthorized assumed-role access.
+
+- policy_id: POL-S3-003
+  title: "S3 buckets must have versioning enabled for data protection"
+  cis_ref: "CIS AWS 2.1.3"
+  enforced_by: "opa"
+  text: >
+    S3 buckets storing business-critical or compliance-regulated data must have versioning enabled to protect against accidental deletion and ransomware overwrite attacks. Non-versioned buckets lose data permanently upon object deletion or malicious encryption overwrites.
+
+- policy_id: POL-S3-004
+  title: "S3 buckets must block public access at the account level"
+  cis_ref: "CIS AWS 2.1.5"
+  enforced_by: "opa"
+  text: >
+    S3 Block Public Access settings must be enabled at the AWS account level to prevent any bucket or object from being made publicly accessible through ACLs or bucket policies. Account-level blocking overrides individual bucket settings preventing accidental public exposure.
+
+- policy_id: POL-S3-005
+  title: "S3 buckets must have access logging enabled for audit trails"
+  cis_ref: "CIS AWS 2.1.4"
+  enforced_by: "opa"
+  text: >
+    S3 buckets containing sensitive data must enable server access logging to a dedicated logging bucket for tracking all object-level read and write operations. Missing access logs prevent forensic investigation of unauthorized data access and exfiltration incidents.
+
+- policy_id: POL-SG-002
+  title: "Security groups must not allow unrestricted RDP ingress"
+  cis_ref: "CIS AWS 5.3"
+  enforced_by: "opa"
+  text: >
+    Security groups must not contain inbound rules allowing Remote Desktop Protocol traffic on port 3389 from 0.0.0.0/0. Unrestricted RDP access enables brute force credential attacks and exploitation of known Windows remote code execution vulnerabilities from the public internet.
+
+- policy_id: POL-SG-003
+  title: "Security groups must have descriptions for all inbound rules"
+  cis_ref: "Org control SG-003"
+  enforced_by: "opa"
+  text: >
+    All security group inbound rules must include human-readable descriptions documenting the business justification and authorized source systems for each network access rule. Undocumented rules prevent effective security review and stale rule identification during access audits.
+
+- policy_id: POL-SG-004
+  title: "Security groups must not allow unrestricted database port ingress"
+  cis_ref: "Org control SG-004"
+  enforced_by: "opa"
+  text: >
+    Security groups must not contain inbound rules allowing database protocol traffic on ports 3306 5432 1433 or 27017 from 0.0.0.0/0. Unrestricted database port exposure enables direct exploitation of database authentication vulnerabilities from the public internet.
+
+- policy_id: POL-SG-005
+  title: "Security groups must not allow unrestricted egress to internet"
+  cis_ref: "Org control SG-005"
+  enforced_by: "llm_contextual"
+  text: >
+    Security groups for workloads processing sensitive data must restrict
+    outbound egress rules to specific destination CIDR blocks and ports
+    required for application functionality. Unrestricted egress allows
+    compromised workloads to exfiltrate data to attacker-controlled endpoints.

@@ -1,0 +1,172 @@
+# Analytics data processing workloads
+# THE VULNERABLE DEPLOYMENT — combines:
+#   1. analytics-processor-sa (from 02-rbac.yaml: has cluster-wide secrets access)
+#   2. hostNetwork: true (bypasses NetworkPolicy and exposes to node network)
+#   3. No securityContext restrictions
+#   4. No NetworkPolicy in analytics namespace (from 04-network-policies.yaml)
+#   5. Runs as root with privilege escalation allowed
+#
+# CROSS-FILE VULNERABILITY CHAIN:
+#   02-rbac.yaml: ClusterRole "analytics-data-access" → grants secrets GET/LIST cluster-wide
+#   02-rbac.yaml: ClusterRoleBinding → binds to analytics-processor-sa
+#   03-secrets-configmaps.yaml: analytics-processor-sa lives in analytics namespace
+#   04-network-policies.yaml: NO NetworkPolicy for analytics namespace
+#   THIS FILE: Deployment uses hostNetwork + analytics-processor-sa + runs as root
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-processor
+  namespace: analytics
+  labels:
+    app: analytics-processor
+    team: data-engineering
+    version: v3.1.0
+  annotations:
+    deployment.kubernetes.io/revision: "7"
+    config.linkerd.io/skip-inbound-ports: "4222"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics-processor
+  template:
+    metadata:
+      labels:
+        app: analytics-processor
+        version: v3.1.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: analytics-processor-sa
+      automountServiceAccountToken: true   # <-- SA token mounted
+      hostNetwork: true                    # <-- Bypasses all NetworkPolicies
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: processor
+          image: registry.enterprise.com/analytics-processor:v3.1.0
+          ports:
+            - containerPort: 9090
+              protocol: TCP
+            - containerPort: 4222
+              protocol: TCP
+          env:
+            - name: BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: analytics-config
+                  key: BATCH_SIZE
+            - name: EXPORT_FORMAT
+              valueFrom:
+                configMapKeyRef:
+                  name: analytics-config
+                  key: EXPORT_FORMAT
+            - name: DATA_LAKE_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: analytics-config
+                  key: DATA_LAKE_BUCKET
+            - name: PII_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pii-encryption-key
+                  key: key
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          resources:
+            limits:
+              cpu: "4000m"
+              memory: "8Gi"
+            requests:
+              cpu: "2000m"
+              memory: "4Gi"
+          # NOTE: no securityContext — runs as root by default
+          volumeMounts:
+            - name: data-cache
+              mountPath: /data/cache
+            - name: host-docker-sock
+              mountPath: /var/run/docker.sock  # <-- Host Docker socket mounted
+      volumes:
+        - name: data-cache
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: host-docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+---
+# Analytics batch job (also uses the same overprivileged SA)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-export
+  namespace: analytics
+  labels:
+    app: nightly-export
+    team: data-engineering
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: analytics-processor-sa
+          automountServiceAccountToken: true
+          containers:
+            - name: exporter
+              image: registry.enterprise.com/data-exporter:v1.2.0
+              env:
+                - name: EXPORT_BUCKET
+                  value: "s3://enterprise-customer-data-exports-2026"
+                - name: PII_COLUMNS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: analytics-config
+                      key: PII_COLUMNS
+              resources:
+                limits:
+                  cpu: "2000m"
+                  memory: "4Gi"
+              # No securityContext
+          restartPolicy: OnFailure
+---
+# Analytics stream processor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-aggregator
+  namespace: analytics
+  labels:
+    app: stream-aggregator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: stream-aggregator
+  template:
+    metadata:
+      labels:
+        app: stream-aggregator
+    spec:
+      serviceAccountName: analytics-processor-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: aggregator
+          image: registry.enterprise.com/stream-aggregator:v2.0.1
+          env:
+            - name: KAFKA_BROKERS
+              value: "kafka-0.kafka.analytics.svc:9092,kafka-1.kafka.analytics.svc:9092"
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
